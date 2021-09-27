@@ -77,6 +77,8 @@ module Buildaemon
         case platform
         when "macos"
           "#{`xcrun --sdk macosx --show-sdk-version`.chomp}_#{configuration}"
+        when "ios"
+          "#{`xcrun --sdk iphoneos --show-sdk-version`.chomp}_#{configuration}"
         else
           "unknown_#{configuration}"
         end
@@ -171,6 +173,9 @@ EOS
                 case platform
                 when "macos"
                   options.push "-DCMAKE_OSX_ARCHITECTURES=#{Environment.Get('BDMN_ARCH')}"
+                when "ios"
+                  sysroot, arch = Environment.Get('BDMN_ARCH').split(".")
+                  options.push "-DCMAKE_OSX_ARCHITECTURES=#{arch} -DCMAKE_OSX_SYSROOT=#{sysroot}"
                 end
                 call "cmake .. #{options.join(' ')}"
               }
@@ -186,7 +191,7 @@ EOS
           case build["type"]
           when "lib"
             case platform
-            when "macos"
+            when "macos", "ios"
               call "lipo -create */*.a -output lib#{build['name']}.a"
               call "lipo -create */*.dylib -output lib#{build['name']}.dylib"
             end
