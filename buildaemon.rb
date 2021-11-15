@@ -96,6 +96,14 @@ module Buildaemon
           "#{`xcrun --sdk macosx --show-sdk-version`.chomp}_#{configuration}"
         when "ios"
           "#{`xcrun --sdk iphoneos --show-sdk-version`.chomp}_#{configuration}"
+        when "linux"
+          if 0 == Command.Call("which hostnamectl")
+            hostname = `hostnamectl --static`.chomp
+          else
+            hostname = "unknown"
+          end
+          compiler_version = `gcc --version`.split("\n")[0].match(/[0-9.]+/)[0]
+          "#{hostname}_#{compiler_version}_#{configuration}"
         else
           "unknown_#{configuration}"
         end
@@ -213,6 +221,9 @@ EOS
             when "macos", "ios"
               call "lipo -create */*.a -output lib#{build['name']}.a"
               call "lipo -create */*.dylib -output lib#{build['name']}.dylib"
+            when "linux"
+              call "cp */*.a ."
+              call "cp */*.so ."
             end
           end
         }
