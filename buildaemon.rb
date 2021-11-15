@@ -26,6 +26,23 @@ module Buildaemon
       Dir.chdir(path){yield} if block_given?
     end
     
+    def removed(path)
+      FileUtils.rm_rf(path) if Dir.exists?(path)
+    end
+    
+    def remaked(path)
+      self.removed(path)
+      self.maked(path)
+    end
+    
+    def copy(src, dst)
+      FileUtils.cp_r(src, dst)
+    end
+    
+    def move(src, dst)
+      FileUtils.move(src, dst)
+    end
+    
     def file_is_update(base_path, target_path)
       File.exists?(target_path) ? File::Stat.new(target_path).mtime < File::Stat.new(base_path).mtime : true
     end
@@ -113,6 +130,8 @@ module Buildaemon
             case name
             when "cmake"
               Cmake(buildaemon, buildaemon_file_path, platform, configuration)
+            when "ndk"
+              Ndk(buildaemon, buildaemon_file_path, platform, configuration)
             else
               abort "Unsupported command: #{name} #{value}"
             end
@@ -195,6 +214,79 @@ EOS
               call "lipo -create */*.a -output lib#{build['name']}.a"
               call "lipo -create */*.dylib -output lib#{build['name']}.dylib"
             end
+          end
+        }
+      }
+    end
+    
+    def self.Ndk(buildaemon, buildaemon_file_path, platform, configuration)
+      configurations = buildaemon["platforms"][platform]["configurations"]
+      buildaemon["builds"].each{|build|
+        maked(build["name"]){
+          maked("jni"){
+            ndk_file_path = "./Android.mk"
+            if file_is_update(buildaemon_file_path, ndk_file_path)
+              open("./Application.mk", "w"){|file|
+                modules = build["name"]
+                case build["type"]
+                when "lib"
+                  modules = "#{modules}-static #{modules}-shared"
+                end
+                
+                file.puts <<EOS
+APP_MODULES := #{modules}
+APP_ABI := #{buildaemon["platforms"][platform]["architectures"].join(" ")}
+EOS
+              }
+              
+              open(ndk_file_path, "w"){|file|
+                case build["type"]
+                when "lib"
+                  file.puts <<EOS
+include $(CLEAR_VARS)
+LOCAL_MODULE := #{build["name"]}-static
+LOCAL_MODULE_FILENAME := lib#{build["name"]}
+LOCAL_SRC_FILES := #{build["srcs"].join(" ")}
+LOCAL_CFLAGS := #{configurations[configuration]['flags']['c']} #{build["incs"].map{|v| "-I#{v}"}.join(" ")}
+LOCAL_CXXFLAGS := #{configurations[configuration]['flags']['cxx']} #{build["incs"].map{|v| "-I#{v}"}.join(" ")}
+LOCAL_LDLIBS := #{configurations[configuration]['links']}
+include $(BUILD_STATIC_LIBRARY)
+
+include $(CLEAR_VARS)
+LOCAL_MODULE := #{build["name"]}-shared
+LOCAL_MODULE_FILENAME := lib#{build["name"]}
+LOCAL_SRC_FILES := #{build["srcs"].join(" ")}
+LOCAL_CFLAGS := #{configurations[configuration]['flags']['c']} #{build["incs"].map{|v| "-I#{v}"}.join(" ")}
+LOCAL_CXXFLAGS := #{configurations[configuration]['flags']['cxx']} #{build["incs"].map{|v| "-I#{v}"}.join(" ")}
+LOCAL_LDLIBS := #{configurations[configuration]['links']}
+include $(BUILD_SHARED_LIBRARY)
+EOS
+                when "exe"
+                  file.puts <<EOS
+include $(CLEAR_VARS)
+LOCAL_MODULE := #{build["name"]}
+LOCAL_SRC_FILES := #{build["srcs"].join(" ")}
+LOCAL_CFLAGS := #{configurations[configuration]['flags']['c']} #{build["incs"].map{|v| "-I#{v}"}.join(" ")}
+LOCAL_CXXFLAGS := #{configurations[configuration]['flags']['cxx']} #{build["incs"].map{|v| "-I#{v}"}.join(" ")}
+LOCAL_LDLIBS := #{configurations[configuration]['links']}
+include $(BUILD_EXECUTABLE)
+EOS
+                else
+                  abort "Unsupported type: #{build['type']}"
+                end
+              }
+            end
+          }
+          
+          call "#{Environment.Get('BDMN_NDK_BUILD'){"ndk-build"}} -B NDK_OUT=./build NDK_APP_DST_DIR='./build/${TARGET_ARCH_ABI}'"
+          
+          case build["type"]
+          when "lib"
+            buildaemon["platforms"][platform]["architectures"].each{|arch|
+              remaked("./libs/#{arch}")
+              copy("./build/local/#{arch}/lib#{build['name']}.a", "./libs/#{arch}/.")
+              copy("./build/local/#{arch}/lib#{build['name']}.so", "./libs/#{arch}/.")
+            }
           end
         }
       }
